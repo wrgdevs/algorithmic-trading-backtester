@@ -22,4 +22,5 @@ class DualMomentum(Strategy):
         selected = (ranks <= self.top_n) & (momentum > self.min_return)
         weights = selected.astype(float)
         counts = weights.sum(axis=1).replace(0, np.nan)
-        return weights.div(counts, axis=0).fillna(0.0)
+        weights = weights.div(counts, axis=0).fillna(0.0)
+        return weights.shift(1).fillna(0.0)

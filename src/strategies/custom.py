@@ -187,4 +187,5 @@ class CustomRuleStrategy(Strategy):
         short_signal = self._eval_rule(self.short_rule, prices) if not self.long_only else pd.DataFrame(False, index=prices.index, columns=prices.columns)
         raw = long_signal.astype(float) - short_signal.astype(float)
         gross = raw.abs().sum(axis=1).replace(0, np.nan)
-        return raw.div(gross, axis=0).fillna(0.0)
+        weights = raw.div(gross, axis=0).fillna(0.0)
+        return weights.shift(1).fillna(0.0)

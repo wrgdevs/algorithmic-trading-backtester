@@ -33,12 +33,40 @@ st.set_page_config(page_title='Algorithmic Trading Backtester', layout='wide')
 st.title('Algorithmic Trading Backtester')
 st.caption('Python · Pandas · NumPy · Plotly · Streamlit · Portfolio Analytics')
 
+
+def parse_tickers(raw: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for token in raw.replace('\n', ',').split(','):
+        ticker = token.strip().upper()
+        if ticker and ticker not in seen:
+            seen.add(ticker)
+            out.append(ticker)
+    return out
+
+
+def safe_top_n_slider(label: str, asset_count: int, default: int = 2) -> int:
+    max_assets = max(1, int(asset_count))
+    return st.slider(label, 1, max_assets, min(default, max_assets))
+
+
 with st.sidebar:
     st.header('Backtest Setup')
-    tickers = st.text_input('Tickers', value='AAPL,MSFT,NVDA,SPY')
+    tickers = st.text_input('Tickers', value='AAPL,MSFT,NVDA,SPY', help='Comma-separated symbols, for example: AAPL,MSFT,NVDA,SPY')
+    ticker_list = parse_tickers(tickers)
     benchmark_ticker = st.text_input('Benchmark', value='SPY')
     start = st.date_input('Start date', value=pd.to_datetime('2019-01-01'))
     end = st.date_input('End date', value=pd.Timestamp.today())
+    data_source = st.radio('Price data source', ['Yahoo Finance', 'CSV upload'], horizontal=True)
+    csv_file = st.file_uploader('Upload price CSV', type=['csv'], help='Wide CSV: Date,AAPL,MSFT... or long CSV: Date,Ticker,Close/Adj Close.') if data_source == 'CSV upload' else None
+
+    input_errors: list[str] = []
+    if not ticker_list:
+        input_errors.append('Enter at least one ticker.')
+    if pd.to_datetime(end) <= pd.to_datetime(start):
+        input_errors.append('End date must be after start date.')
+    if data_source == 'CSV upload' and csv_file is None:
+        input_errors.append('Upload a CSV file or switch back to Yahoo Finance.')
 
     st.header('Execution Model')
     initial_cash = st.number_input('Initial cash', min_value=1_000, value=100_000, step=10_000)
@@ -92,7 +120,7 @@ with st.sidebar:
         strategy = BollingerMeanReversion(window=window, num_std=num_std)
     elif strategy_name == 'Cross-Sectional Momentum':
         lookback = st.slider('Momentum lookback', 20, 252, 63)
-        top_n = st.slider('Top N assets', 1, max(1, len([x for x in tickers.split(',') if x.strip()])), 2)
+        top_n = safe_top_n_slider('Top N assets', len(ticker_list), 2)
         strategy = CrossSectionalMomentum(lookback=lookback, top_n=top_n)
     elif strategy_name == 'Inverse Volatility Portfolio':
         window = st.slider('Volatility window', 20, 252, 63)
@@ -108,21 +136,26 @@ with st.sidebar:
         strategy = DonchianBreakout(entry_window=entry_window, exit_window=exit_window, long_only=long_only)
     elif strategy_name == 'Dual Momentum':
         lookback = st.slider('Momentum lookback', 20, 252, 126)
-        top_n = st.slider('Top N assets', 1, max(1, len([x for x in tickers.split(',') if x.strip()])), 2)
+        top_n = safe_top_n_slider('Top N assets', len(ticker_list), 2)
         min_return = st.slider('Minimum lookback return', -0.20, 0.30, 0.0, 0.01)
         strategy = DualMomentum(lookback=lookback, top_n=top_n, min_return=min_return)
     elif strategy_name == 'Pairs Trading Spread Reversion':
-        ticker_list = [x.strip().upper() for x in tickers.split(',') if x.strip()]
-        first = st.selectbox('First pair asset', ticker_list, index=0)
-        second = st.selectbox('Second pair asset', ticker_list, index=min(1, len(ticker_list)-1))
-        window = st.slider('Spread z-score window', 10, 120, 30)
-        entry_z = st.slider('Pair entry z-score', 0.5, 3.5, 1.5, 0.25)
-        exit_z = st.slider('Pair exit z-score', 0.0, 1.5, 0.25, 0.05)
-        strategy = PairsTradingStrategy(first, second, window=window, entry_z=entry_z, exit_z=exit_z)
+        if len(ticker_list) < 2:
+            st.warning('Pairs trading needs at least two tickers.')
+            input_errors.append('Pairs trading needs at least two tickers.')
+            strategy = BuyAndHold()
+        else:
+            first = st.selectbox('First pair asset', ticker_list, index=0)
+            second_options = [ticker for ticker in ticker_list if ticker != first]
+            second = st.selectbox('Second pair asset', second_options, index=0)
+            window = st.slider('Spread z-score window', 10, 120, 30)
+            entry_z = st.slider('Pair entry z-score', 0.5, 3.5, 1.5, 0.25)
+            exit_z = st.slider('Pair exit z-score', 0.0, 1.5, 0.25, 0.05)
+            strategy = PairsTradingStrategy(first, second, window=window, entry_z=entry_z, exit_z=exit_z)
     elif strategy_name == 'Regime Switching Momentum':
         trend_window = st.slider('Market regime trend window', 50, 300, 200)
         lookback = st.slider('Risk-on momentum lookback', 20, 252, 63)
-        top_n = st.slider('Risk-on top N assets', 1, max(1, len([x for x in tickers.split(',') if x.strip()])), 2)
+        top_n = safe_top_n_slider('Risk-on top N assets', len(ticker_list), 2)
         strategy = RegimeSwitchingStrategy(trend_window=trend_window, momentum_lookback=lookback, top_n=top_n)
     elif strategy_name == 'Custom Rule Strategy':
         st.caption('No-code rule designer with presets, validation, and advanced manual mode.')
@@ -184,13 +217,23 @@ with st.sidebar:
     else:
         strategy = BuyAndHold()
 
-    run = st.button('Run Backtest', type='primary')
+    if input_errors:
+        for error in input_errors:
+            st.warning(error)
+    run = st.button('Run Backtest', type='primary', disabled=bool(input_errors))
     run_optimizer = st.checkbox('Run MA parameter optimizer')
 
 if run:
     try:
-        prices = load_prices(tickers, start=str(start), end=str(end))
-        benchmark = load_prices(benchmark_ticker, start=str(start), end=str(end)) if benchmark_ticker else None
+        source = 'csv' if data_source == 'CSV upload' else 'yfinance'
+        prices = load_prices(ticker_list, start=str(start), end=str(end), source=source, csv_path=csv_file)
+        benchmark_symbols = parse_tickers(benchmark_ticker)
+        benchmark = None
+        if benchmark_symbols:
+            try:
+                benchmark = load_prices(benchmark_symbols[:1], start=str(start), end=str(end), source=source, csv_path=csv_file)
+            except Exception as bench_exc:
+                st.warning(f'Benchmark could not be loaded and will be skipped: {bench_exc}')
         engine_kwargs = dict(
             initial_cash=initial_cash,
             commission=commission,
@@ -261,7 +304,7 @@ if run:
                 d1, d2, d3 = st.columns(3)
                 d1.metric('Active signal days', f'{active_days:.1%}')
                 d2.metric('Average turnover', f'{hist["Turnover"].mean():.2%}')
-                d3.metric('Total estimated costs', f'{hist["Trading Cost"].sum():.2%}')
+                d3.metric('Total estimated cost drag', f'{hist["Trading Cost"].sum():.2%}')
                 st.plotly_chart(px.imshow(signal_sample.T, aspect='auto', title='Signal heatmap, last 252 trading days'), use_container_width=True)
                 st.dataframe(avg_names, use_container_width=True, hide_index=True)
                 if strategy_name == 'Custom Rule Strategy':
