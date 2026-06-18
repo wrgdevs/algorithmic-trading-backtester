@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT / 'src'))
 
 from backtester.engine import BacktestEngine
-from backtester.optimizer import grid_search
+from backtester.optimizer import grid_search, walk_forward_search
 from strategies.macd import MACDTrendStrategy
 from strategies.bollinger import BollingerMeanReversion
 from strategies.momentum import CrossSectionalMomentum
@@ -38,6 +38,9 @@ def test_engine_risk_controls_add_exposure_columns():
     hist = result['history']
     assert 'Gross Exposure' in hist.columns
     assert hist['Gross Exposure'].max() <= 0.800001
+    assert result['metrics']['Trade Count'] == len(result['trades'])
+    assert 'Annualized Turnover' in result['metrics']
+    assert 'Total Trading Cost' in result['metrics']
 
 
 def test_grid_search_returns_ranked_results():
@@ -45,3 +48,19 @@ def test_grid_search_returns_ranked_results():
     results = grid_search(prices, MovingAverageCrossover, {'short_window': [5, 10], 'long_window': [20, 30]})
     assert len(results) == 4
     assert 'Sharpe Ratio' in results.columns
+
+
+def test_walk_forward_search_reports_only_test_metrics():
+    prices = sample_prices()
+    results = walk_forward_search(
+        prices,
+        MovingAverageCrossover,
+        {'short_window': [5, 10], 'long_window': [20, 30]},
+        train_size=60,
+        test_size=30,
+    )
+    assert len(results) == 2
+    assert list(results['Fold']) == [1, 2]
+    assert 'Train Sharpe Ratio' in results.columns
+    assert 'Test Sharpe Ratio' in results.columns
+    assert (results['Test Start'] > results['Train End']).all()

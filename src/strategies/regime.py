@@ -26,4 +26,4 @@ class RegimeSwitchingStrategy(Strategy):
         counts = weights.sum(axis=1).replace(0, np.nan)
         weights = weights.div(counts, axis=0).fillna(0.0)
         weights = weights.mul(risk_on.astype(float), axis=0)
-        return weights.shift(1).fillna(0.0)
+        return weights

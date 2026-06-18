@@ -17,4 +17,4 @@ class CrossSectionalMomentum(Strategy):
         ranks = momentum.rank(axis=1, ascending=False, method='first')
         selected = (ranks <= min(self.top_n, len(prices.columns))).astype(float)
         weights = selected.div(selected.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0)
-        return weights.shift(1).fillna(0.0)
+        return weights

@@ -15,6 +15,15 @@ def drawdown_series(equity_curve: pd.Series) -> pd.Series:
     return equity_curve / equity_curve.cummax() - 1
 
 
+def max_drawdown_duration(equity_curve: pd.Series) -> int:
+    """Return the longest number of consecutive observations below a prior peak."""
+    underwater = drawdown_series(equity_curve) < 0
+    if underwater.empty or not underwater.any():
+        return 0
+    groups = (~underwater).cumsum()
+    return int(underwater.groupby(groups).sum().max())
+
+
 def value_at_risk(returns: pd.Series, level: float = 0.05) -> float:
     """Historical one-period VaR as a return threshold.
 
@@ -40,7 +49,7 @@ def conditional_value_at_risk(returns: pd.Series, level: float = 0.05) -> float:
 def annualized_return_from_equity(equity_curve: pd.Series, periods_per_year: int = TRADING_DAYS) -> float:
     """Geometric annualized return from an equity curve."""
     equity_curve = equity_curve.astype(float).dropna()
-    if len(equity_curve) < 2 or equity_curve.iloc[0] <= 0:
+    if len(equity_curve) < 2 or equity_curve.iloc[0] <= 0 or equity_curve.iloc[-1] <= 0:
         return np.nan
     total_return = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
     years = max((len(equity_curve) - 1) / periods_per_year, 1 / periods_per_year)
@@ -67,20 +76,24 @@ def calculate_metrics(
 
     total_return = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
     annual_return = annualized_return_from_equity(equity_curve)
-    annual_volatility = returns.std(ddof=0) * np.sqrt(TRADING_DAYS)
+    return_std = returns.std(ddof=0)
+    annual_volatility = return_std * np.sqrt(TRADING_DAYS)
 
     daily_rf = (1 + risk_free_rate) ** (1 / TRADING_DAYS) - 1
     excess_daily = returns - daily_rf
     excess_annual_return = (1 + excess_daily.mean()) ** TRADING_DAYS - 1
-    sharpe = (excess_daily.mean() / returns.std(ddof=0)) * np.sqrt(TRADING_DAYS) if returns.std(ddof=0) != 0 else np.nan
+    sharpe = (excess_daily.mean() / return_std) * np.sqrt(TRADING_DAYS) if return_std != 0 else np.nan
 
-    downside_excess = excess_daily[excess_daily < 0]
-    downside_deviation = downside_excess.std(ddof=0) * np.sqrt(TRADING_DAYS) if not downside_excess.empty else np.nan
-    sortino = excess_annual_return / downside_deviation if downside_deviation and not np.isnan(downside_deviation) else np.nan
+    # Downside deviation uses all observations, with non-negative excess returns
+    # contributing zero. Taking the std of only losing days understates risk.
+    downside_deviation = np.sqrt(np.mean(np.minimum(excess_daily, 0.0) ** 2)) * np.sqrt(TRADING_DAYS)
+    sortino = excess_annual_return / downside_deviation if downside_deviation > 0 else np.nan
 
     dd = drawdown_series(equity_curve)
     max_drawdown = dd.min()
     calmar = annual_return / abs(max_drawdown) if max_drawdown != 0 else np.nan
+    ulcer_index = float(np.sqrt(np.mean(dd**2)))
+    recovery_factor = total_return / abs(max_drawdown) if max_drawdown != 0 else np.nan
 
     positive_days = returns[returns > 0]
     negative_days = returns[returns < 0]
@@ -97,6 +110,9 @@ def calculate_metrics(
         'Sharpe Ratio': float(sharpe),
         'Sortino Ratio': float(sortino),
         'Max Drawdown': float(max_drawdown),
+        'Max Drawdown Duration': max_drawdown_duration(equity_curve),
+        'Ulcer Index': ulcer_index,
+        'Recovery Factor': float(recovery_factor),
         'Calmar Ratio': float(calmar),
         'Positive Day Rate': float((returns > 0).mean()),
         'Profit Factor': float(profit_factor),
@@ -115,8 +131,10 @@ def calculate_metrics(
         bench_returns = bench_returns.reindex(aligned.index).dropna()
         if len(aligned) > 2 and len(bench_returns) == len(aligned):
             bench_total = benchmark_curve.iloc[-1] / benchmark_curve.iloc[0] - 1
+            strategy_overlap = equity_curve.loc[benchmark_curve.index]
+            strategy_total = strategy_overlap.iloc[-1] / strategy_overlap.iloc[0] - 1
             metrics['Benchmark Total Return'] = float(bench_total)
-            metrics['Excess Return'] = float(total_return - bench_total)
+            metrics['Excess Return'] = float(strategy_total - bench_total)
             bench_var = bench_returns.var(ddof=0)
             if bench_var != 0:
                 beta = aligned.cov(bench_returns, ddof=0) / bench_var

@@ -78,3 +78,14 @@ def test_custom_rule_validation_blocks_unsafe_code():
         assert 'Blocked unsafe token' in str(exc)
     else:
         raise AssertionError('unsafe custom rule should have been rejected')
+
+
+def test_ensemble_rejects_invalid_weights():
+    strategy = MovingAverageCrossover(10, 30)
+    for weights in ([1.0, 2.0], [0.0], [-1.0]):
+        try:
+            EnsembleStrategy([strategy], weights)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'invalid ensemble weights were accepted: {weights}')

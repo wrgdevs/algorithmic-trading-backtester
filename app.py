@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.append(str(ROOT / 'src'))
 
 from backtester.engine import BacktestEngine
-from backtester.optimizer import grid_search
+from backtester.optimizer import grid_search, walk_forward_search
 from backtester.reporting import export_report
 from data.loader import load_prices
 from strategies.buy_hold import BuyAndHold
@@ -222,6 +222,7 @@ with st.sidebar:
             st.warning(error)
     run = st.button('Run Backtest', type='primary', disabled=bool(input_errors))
     run_optimizer = st.checkbox('Run MA parameter optimizer')
+    optimizer_mode = st.selectbox('Optimizer validation', ['Walk-forward', 'In-sample grid search']) if run_optimizer else 'Walk-forward'
 
 if run:
     try:
@@ -315,17 +316,39 @@ if run:
 
         with tabs[5]:
             if run_optimizer:
-                opt = grid_search(
-                    prices,
-                    MovingAverageCrossover,
-                    {'short_window': [10, 20, 30], 'long_window': [50, 100, 150]},
-                    engine_kwargs=engine_kwargs,
-                    benchmark=benchmark,
-                    objective='Sharpe Ratio',
-                )
-                st.dataframe(opt, use_container_width=True)
-                if not opt.empty and 'Sharpe Ratio' in opt:
-                    st.plotly_chart(px.scatter(opt, x='Annual Volatility', y='Annual Return', size='Sharpe Ratio', hover_data=['short_window', 'long_window'], title='Optimizer: return vs risk'), use_container_width=True)
+                parameter_grid = {'short_window': [10, 20, 30], 'long_window': [50, 100, 150]}
+                if optimizer_mode == 'Walk-forward':
+                    if len(prices) < 120:
+                        st.warning('Walk-forward validation needs at least 120 price rows.')
+                    else:
+                        train_size = min(252, len(prices) // 2)
+                        test_size = min(63, max(20, (len(prices) - train_size) // 2))
+                        opt = walk_forward_search(
+                            prices,
+                            MovingAverageCrossover,
+                            parameter_grid,
+                            train_size=train_size,
+                            test_size=test_size,
+                            engine_kwargs=engine_kwargs,
+                            benchmark=benchmark,
+                            objective='Sharpe Ratio',
+                        )
+                        st.caption(f'Rolling validation: {train_size} training rows, then {test_size} unseen test rows per fold.')
+                        st.dataframe(opt, use_container_width=True)
+                        if not opt.empty and 'Test Total Return' in opt:
+                            st.plotly_chart(px.bar(opt, x='Fold', y='Test Total Return', title='Out-of-sample return by fold'), use_container_width=True)
+                else:
+                    opt = grid_search(
+                        prices,
+                        MovingAverageCrossover,
+                        parameter_grid,
+                        engine_kwargs=engine_kwargs,
+                        benchmark=benchmark,
+                        objective='Sharpe Ratio',
+                    )
+                    st.dataframe(opt, use_container_width=True)
+                    if not opt.empty and 'Sharpe Ratio' in opt:
+                        st.plotly_chart(px.scatter(opt, x='Annual Volatility', y='Annual Return', size='Sharpe Ratio', hover_data=['short_window', 'long_window'], title='Optimizer: return vs risk'), use_container_width=True)
             else:
                 st.info('Enable optimizer in the sidebar to run a small MA parameter sweep.')
 

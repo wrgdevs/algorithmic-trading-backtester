@@ -162,11 +162,16 @@ class CustomRuleStrategy(Strategy):
             'drawdown': prices / running_peak - 1,
         }
 
-    def _eval_rule(self, rule: str, prices: pd.DataFrame) -> pd.DataFrame:
+    def _eval_rule(
+        self,
+        rule: str,
+        prices: pd.DataFrame,
+        context: dict[str, pd.DataFrame] | None = None,
+    ) -> pd.DataFrame:
         if not rule.strip():
             return pd.DataFrame(False, index=prices.index, columns=prices.columns)
         self.validate_rule(rule)
-        context = self._context(prices)
+        context = context if context is not None else self._context(prices)
         safe_rule = self._normalize_rule(rule)
         try:
             result = eval(safe_rule, {'__builtins__': {}}, context)  # noqa: S307 - restricted namespace, validated names
@@ -183,9 +188,12 @@ class CustomRuleStrategy(Strategy):
         return result.reindex(index=prices.index, columns=prices.columns).fillna(False).astype(bool)
 
     def generate_signals(self, prices: pd.DataFrame) -> pd.DataFrame:
-        long_signal = self._eval_rule(self.long_rule, prices)
-        short_signal = self._eval_rule(self.short_rule, prices) if not self.long_only else pd.DataFrame(False, index=prices.index, columns=prices.columns)
+        # Indicator construction dominates runtime, so share one context between
+        # long and short expressions instead of calculating every indicator twice.
+        context = self._context(prices)
+        long_signal = self._eval_rule(self.long_rule, prices, context)
+        short_signal = self._eval_rule(self.short_rule, prices, context) if not self.long_only else pd.DataFrame(False, index=prices.index, columns=prices.columns)
         raw = long_signal.astype(float) - short_signal.astype(float)
         gross = raw.abs().sum(axis=1).replace(0, np.nan)
         weights = raw.div(gross, axis=0).fillna(0.0)
-        return weights.shift(1).fillna(0.0)
+        return weights

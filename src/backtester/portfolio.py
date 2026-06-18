@@ -28,6 +28,21 @@ class Portfolio:
         volatility_target: float | None = None,
         volatility_window: int = 20,
     ):
+        numeric_settings = [initial_cash, commission, slippage, max_weight, max_gross_exposure]
+        if not all(np.isfinite(value) for value in numeric_settings):
+            raise ValueError('Portfolio settings must be finite numbers.')
+        if initial_cash <= 0:
+            raise ValueError('initial_cash must be positive.')
+        if commission < 0 or slippage < 0:
+            raise ValueError('commission and slippage cannot be negative.')
+        if commission + slippage >= 1:
+            raise ValueError('combined commission and slippage must be less than 1.0.')
+        if max_weight <= 0 or max_gross_exposure <= 0:
+            raise ValueError('max_weight and max_gross_exposure must be positive.')
+        if volatility_target is not None and volatility_target <= 0:
+            raise ValueError('volatility_target must be positive when provided.')
+        if volatility_window < 2:
+            raise ValueError('volatility_window must be at least 2.')
         self.initial_cash = float(initial_cash)
         self.commission = float(commission)
         self.slippage = float(slippage)
@@ -61,6 +76,8 @@ class Portfolio:
         freq = self.rebalance_frequency.upper()
         if freq in {'D', 'DAILY'}:
             return weights
+        if not isinstance(weights.index, pd.DatetimeIndex):
+            raise ValueError('Weekly and monthly rebalancing require a DatetimeIndex.')
         if freq in {'W', 'WEEKLY'}:
             mask = weights.index.to_series().dt.to_period('W').ne(weights.index.to_series().dt.to_period('W').shift(1))
         elif freq in {'M', 'MONTHLY'}:
@@ -71,9 +88,33 @@ class Portfolio:
         return rebalanced
 
     def simulate(self, prices: pd.DataFrame, target_weights: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-        prices = prices.copy().ffill().dropna()
+        if not isinstance(prices, pd.DataFrame) or prices.empty:
+            raise ValueError('prices must be a non-empty pandas DataFrame.')
+        if not isinstance(target_weights, pd.DataFrame):
+            raise TypeError('target_weights must be a pandas DataFrame.')
+        if prices.index.has_duplicates or prices.columns.has_duplicates:
+            raise ValueError('prices index and columns must be unique.')
+        if not prices.index.is_monotonic_increasing:
+            raise ValueError('prices index must be sorted in increasing order.')
+
+        prices = prices.copy().apply(pd.to_numeric, errors='coerce')
+        prices = prices.replace([np.inf, -np.inf], np.nan).ffill().dropna()
+        if prices.empty:
+            raise ValueError('prices contain no complete, usable rows.')
+        if (prices <= 0).any().any():
+            raise ValueError('prices must be strictly positive.')
+
         asset_returns = prices.pct_change().fillna(0.0)
-        weights = target_weights.reindex(prices.index).fillna(0.0)
+        # Do not ignore assets silently: extra/missing signal columns are almost
+        # always a strategy bug and can create misleading exposure statistics.
+        if target_weights.index.has_duplicates or target_weights.columns.has_duplicates:
+            raise ValueError('target_weights index and columns must be unique.')
+        if set(target_weights.columns) != set(prices.columns):
+            raise ValueError('target_weights columns must exactly match prices columns.')
+        if not prices.index.isin(target_weights.index).all():
+            raise ValueError('target_weights must contain every usable price date.')
+        weights = target_weights.reindex(index=prices.index, columns=prices.columns)
+        weights = weights.apply(pd.to_numeric, errors='coerce').fillna(0.0)
         weights = self._apply_risk_controls(weights, asset_returns)
         weights = self._apply_rebalance_frequency(weights)
 
@@ -81,6 +122,10 @@ class Portfolio:
         trading_costs = turnover * (self.commission + self.slippage)
         portfolio_returns_before_costs = (weights.shift(1).fillna(0.0) * asset_returns).sum(axis=1)
         portfolio_returns = portfolio_returns_before_costs - trading_costs
+        bankrupt = portfolio_returns <= -1.0
+        if bankrupt.any():
+            failed_at = portfolio_returns.index[bankrupt.argmax()]
+            raise ValueError(f'Portfolio lost 100% or more on {failed_at}; reduce leverage or trading costs.')
         equity = self.initial_cash * (1 + portfolio_returns).cumprod()
 
         positions_value = weights.mul(equity, axis=0)

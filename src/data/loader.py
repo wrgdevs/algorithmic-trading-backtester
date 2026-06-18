@@ -8,8 +8,10 @@ import pandas as pd
 
 def _normalize_tickers(tickers: str | Iterable[str]) -> list[str]:
     if isinstance(tickers, str):
-        return [t.strip().upper() for t in tickers.split(',') if t.strip()]
-    return [str(t).strip().upper() for t in tickers if str(t).strip()]
+        normalized = [t.strip().upper() for t in tickers.split(',') if t.strip()]
+    else:
+        normalized = [str(t).strip().upper() for t in tickers if str(t).strip()]
+    return list(dict.fromkeys(normalized))
 
 
 def load_prices(

@@ -14,4 +14,4 @@ class InverseVolatilityPortfolio(Strategy):
         vol = prices.pct_change().rolling(self.window).std()
         inv = 1 / vol.replace(0, pd.NA)
         weights = inv.div(inv.sum(axis=1), axis=0).fillna(0.0)
-        return weights.shift(1).fillna(0.0)
+        return weights

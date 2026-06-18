@@ -44,4 +44,4 @@ class PairsTradingStrategy(Strategy):
                 position = 0.0
             weights.iloc[i, weights.columns.get_loc(a)] = 0.5 * position
             weights.iloc[i, weights.columns.get_loc(b)] = -0.5 * position
-        return weights.shift(1).fillna(0.0)
+        return weights

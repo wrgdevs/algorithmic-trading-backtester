@@ -21,5 +21,4 @@ class MACDTrendStrategy(Strategy):
         raw = (line > signal_line).astype(float)
         if not self.long_only:
             raw = raw.replace(0.0, -1.0)
-        raw = raw.shift(1).fillna(0.0)
         return raw.div(len(prices.columns))

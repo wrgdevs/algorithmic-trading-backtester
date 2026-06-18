@@ -25,7 +25,5 @@ class RSIStrategy(Strategy):
         state[rsi_values < self.oversold] = 1.0
         state[rsi_values > self.overbought] = 0.0
         state = state.ffill().fillna(0.0)
-        # Use tomorrow's close/return after today's RSI is known.
-        state = state.shift(1).fillna(0.0)
         gross = state.abs().sum(axis=1).replace(0, np.nan)
         return state.div(gross, axis=0).fillna(0.0)

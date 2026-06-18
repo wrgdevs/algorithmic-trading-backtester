@@ -23,4 +23,4 @@ class DualMomentum(Strategy):
         weights = selected.astype(float)
         counts = weights.sum(axis=1).replace(0, np.nan)
         weights = weights.div(counts, axis=0).fillna(0.0)
-        return weights.shift(1).fillna(0.0)
+        return weights

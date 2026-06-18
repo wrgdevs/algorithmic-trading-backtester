@@ -4,7 +4,13 @@ import pandas as pd
 
 from .metrics import calculate_metrics, drawdown_series
 from .portfolio import Portfolio
-from strategies.base import Strategy
+
+# Support both documented ``backtester.*`` imports (with src on sys.path) and
+# repository-root ``src.backtester.*`` imports used by library consumers.
+try:
+    from strategies.base import Strategy
+except ModuleNotFoundError:
+    from src.strategies.base import Strategy
 
 
 class BacktestEngine:
@@ -20,6 +26,8 @@ class BacktestEngine:
         volatility_target: float | None = None,
         risk_free_rate: float = 0.0,
     ):
+        if risk_free_rate <= -1:
+            raise ValueError('risk_free_rate must be greater than -1.0.')
         self.portfolio = Portfolio(
             initial_cash=initial_cash,
             commission=commission,
@@ -39,9 +47,16 @@ class BacktestEngine:
         benchmark_curve = None
         if benchmark is not None and not benchmark.empty:
             bench_prices = benchmark.iloc[:, 0].reindex(history.index).ffill().dropna()
-            benchmark_curve = history['Equity'].iloc[0] * bench_prices / bench_prices.iloc[0]
+            if not bench_prices.empty:
+                benchmark_curve = history['Equity'].loc[bench_prices.index[0]] * bench_prices / bench_prices.iloc[0]
 
         metrics = calculate_metrics(history['Equity'], benchmark_curve, risk_free_rate=self.risk_free_rate)
+        metrics.update({
+            'Trade Count': int(len(trades)),
+            'Total Trading Cost': float(trades['Estimated Cost'].sum()) if not trades.empty else 0.0,
+            'Total Cost Drag': float(history['Trading Cost'].sum()),
+            'Annualized Turnover': float(history['Turnover'].mean() * 252),
+        })
         history['Drawdown'] = drawdown_series(history['Equity'])
         if benchmark_curve is not None:
             history['Benchmark'] = benchmark_curve

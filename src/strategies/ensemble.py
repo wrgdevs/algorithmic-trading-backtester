@@ -14,8 +14,14 @@ class EnsembleStrategy(Strategy):
     def __init__(self, strategies: list[Strategy], weights: list[float] | None = None):
         if not strategies:
             raise ValueError('EnsembleStrategy needs at least one strategy.')
+        if weights is not None and len(weights) != len(strategies):
+            raise ValueError('weights must have one value per strategy.')
         self.strategies = strategies
         self.ensemble_weights = np.array(weights if weights is not None else [1.0] * len(strategies), dtype=float)
+        if not np.isfinite(self.ensemble_weights).all() or (self.ensemble_weights < 0).any():
+            raise ValueError('Ensemble weights must be finite and non-negative.')
+        if self.ensemble_weights.sum() <= 0:
+            raise ValueError('Ensemble weights must have a positive sum.')
         self.ensemble_weights = self.ensemble_weights / self.ensemble_weights.sum()
 
     def generate_signals(self, prices: pd.DataFrame) -> pd.DataFrame:

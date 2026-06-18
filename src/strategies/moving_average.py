@@ -20,5 +20,4 @@ class MovingAverageCrossover(Strategy):
         raw = (short_ma > long_ma).astype(float)
         if not self.long_only:
             raw = raw.replace(0.0, -1.0)
-        raw = raw.shift(1).fillna(0.0)  # trade after signal is known
         return raw.div(len(prices.columns))

@@ -74,6 +74,8 @@ The dashboard includes a no-code custom strategy interface with:
 - Alpha, beta, correlation, tracking error, and excess return vs benchmark
 - Win rate, profit factor, best/worst day
 - Historical VaR and CVaR
+- Trade count, annualized turnover, cost drag, and estimated trading cost
+- Drawdown duration, Ulcer Index, and recovery factor
 - Monthly returns and allocation analysis
 
 ### Dashboard
@@ -83,7 +85,7 @@ The dashboard includes a no-code custom strategy interface with:
 - Portfolio vs benchmark chart
 - Drawdown, return distribution, exposure, and allocation charts
 - Trade log viewer
-- Moving-average parameter optimizer
+- Moving-average parameter optimizer with walk-forward out-of-sample validation
 - Custom strategy rule editor
 - CSV downloads and HTML report export
 
